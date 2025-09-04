@@ -248,7 +248,7 @@ impl ToolManagerBuilder {
     /// - Finally, creates an instance of [ToolManager]
     pub async fn build(
         mut self,
-        os: &mut Os,
+        os: &Os,
         mut output: Box<dyn Write + Send + Sync + 'static>,
         interactive: bool,
     ) -> eyre::Result<ToolManager> {
@@ -624,7 +624,7 @@ impl ToolManager {
 
     pub async fn load_tools(
         &mut self,
-        os: &mut Os,
+        os: &Os,
         stderr: &mut impl Write,
     ) -> eyre::Result<HashMap<String, ToolSpec>> {
         let tx = self.loading_status_sender.take();
