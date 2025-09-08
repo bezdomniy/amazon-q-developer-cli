@@ -62,6 +62,7 @@ use crossterm::{
     terminal,
 };
 use eyre::{
+    ErrReport,
     Report,
     Result,
     bail,
@@ -407,9 +408,6 @@ impl ChatArgs {
         let outgoing = tokio::io::stdout().compat_write();
         let incoming = tokio::io::stdin().compat();
 
-        // let os_cell = RefCell::new(&mut *os);
-
-
         let local_set = tokio::task::LocalSet::new();
         local_set
             .run_until(async move {
@@ -426,7 +424,7 @@ impl ChatArgs {
                     while let Some((session_notification, tx)) = rx.recv().await {
                         let result = conn.session_notification(session_notification).await;
                         if let Err(e) = result {
-                            // log::error!("{e}");
+                            error!("{e}");
                             break;
                         }
                         tx.send(()).ok();
@@ -435,11 +433,9 @@ impl ChatArgs {
                 // Run until stdin/stdout are closed.
                 handle_io.await
             })
-            .await;
-
-        // run_zed_integration(self, os);
-
-        Ok(ExitCode::SUCCESS)
+            .await
+        .map_err(|_| ErrReport::msg("Failed to run chat"))
+        .map(|_| ExitCode::SUCCESS)
     }
 }
 
