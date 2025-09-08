@@ -1,5 +1,3 @@
-pub mod dummy_agent;
-
 use std::{cell::{RefCell}, collections::HashMap, io::Write, sync::Arc};
 
 use agent_client_protocol::{self as acp, ContentBlock, SessionNotification, TextContent};
