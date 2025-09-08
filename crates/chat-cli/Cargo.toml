@@ -124,6 +124,9 @@ winnow.workspace = true
 schemars.workspace = true
 jsonschema.workspace = true
 
+anyhow = "1.0.0"
+agent-client-protocol = "0.1.1"
+
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true
 skim.workspace = true

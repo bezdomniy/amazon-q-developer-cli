@@ -7,6 +7,7 @@ mod issue;
 mod mcp;
 mod settings;
 mod user;
+mod zed_integration;
 
 use std::fmt::Display;
 use std::io::{
@@ -94,6 +95,8 @@ pub enum RootSubcommand {
     Agent(AgentArgs),
     /// AI assistant in your terminal
     Chat(ChatArgs),
+    /// Zed Integration with Agent Client Protocol
+    ExperimentalZedIntegration(ChatArgs),
     /// Log in to Amazon Q
     Login(LoginArgs),
     /// Log out of Amazon Q
@@ -163,6 +166,7 @@ impl RootSubcommand {
             Self::Issue(args) => args.execute(os).await,
             Self::Version { changelog } => Cli::print_version(changelog),
             Self::Chat(args) => args.execute(os).await,
+            Self::ExperimentalZedIntegration(args) => args.execute_zed_integration(os).await,
             Self::Mcp(args) => args.execute(os, &mut std::io::stderr()).await,
         }
     }
@@ -179,6 +183,7 @@ impl Display for RootSubcommand {
         let name = match self {
             Self::Agent(_) => "agent",
             Self::Chat(_) => "chat",
+            Self::ExperimentalZedIntegration(_) => "experimental-zed-integration",
             Self::Login(_) => "login",
             Self::Logout => "logout",
             Self::Whoami(_) => "whoami",

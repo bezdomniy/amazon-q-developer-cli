@@ -3,7 +3,7 @@ mod consts;
 pub mod context;
 mod conversation;
 mod error_formatter;
-mod input_source;
+pub mod input_source;
 mod message;
 mod parse;
 use std::path::MAIN_SEPARATOR;
@@ -35,6 +35,7 @@ use std::time::{
     Instant,
 };
 
+use agent_client_protocol::{AgentSideConnection, Client};
 use amzn_codewhisperer_client::types::SubscriptionStatus;
 use clap::{
     Args,
@@ -95,6 +96,7 @@ use tokio::sync::{
     Mutex,
     broadcast,
 };
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tool_manager::{
     PromptQuery,
     PromptQueryResult,
@@ -137,6 +139,7 @@ use crate::api_client::{
 };
 use crate::auth::AuthError;
 use crate::auth::builder_id::is_idc_user;
+use crate::cli::zed_integration::QAgent;
 use crate::cli::TodoListState;
 use crate::cli::agent::Agents;
 use crate::cli::chat::cli::SlashCommand;
@@ -395,6 +398,49 @@ impl ChatArgs {
         .await
         .map(|_| ExitCode::SUCCESS)
     }
+
+    pub async fn execute_zed_integration(&self, os: &mut Os) -> Result<ExitCode> {
+        // if self.input.is_none() {
+        //     bail!("Input must be supplied when running in non-interactive mode");
+        // }
+
+        let outgoing = tokio::io::stdout().compat_write();
+        let incoming = tokio::io::stdin().compat();
+
+        // let os_cell = RefCell::new(&mut *os);
+
+
+        let local_set = tokio::task::LocalSet::new();
+        local_set
+            .run_until(async move {
+
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                let q_agent = QAgent::new(tx, self.clone(), os.clone()).await;
+
+                // Start up the ExampleAgent connected to stdio.
+                let (conn, handle_io) = AgentSideConnection::new(q_agent, outgoing, incoming, |fut| {
+                    tokio::task::spawn_local(fut);
+                });
+                // Kick off a background task to send the ExampleAgent's session notifications to the client.
+                tokio::task::spawn_local(async move {
+                    while let Some((session_notification, tx)) = rx.recv().await {
+                        let result = conn.session_notification(session_notification).await;
+                        if let Err(e) = result {
+                            // log::error!("{e}");
+                            break;
+                        }
+                        tx.send(()).ok();
+                    }
+                });
+                // Run until stdin/stdout are closed.
+                handle_io.await
+            })
+            .await;
+
+        // run_zed_integration(self, os);
+
+        Ok(ExitCode::SUCCESS)
+    }
 }
 
 const WELCOME_TEXT: &str = color_print::cstr! {"<cyan!>
@@ -575,7 +621,7 @@ pub struct ChatSession {
     terminal_width_provider: fn() -> Option<usize>,
     spinner: Option<Spinner>,
     /// [ConversationState].
-    conversation: ConversationState,
+    pub conversation: ConversationState,
     /// Tool uses requested by the model that are actively being handled.
     tool_uses: Vec<QueuedTool>,
     /// An index into [Self::tool_uses] to represent the current tool use being handled.
@@ -596,14 +642,14 @@ pub struct ChatSession {
     /// Pending prompts to be sent
     pending_prompts: VecDeque<Prompt>,
     interactive: bool,
-    inner: Option<ChatState>,
+    pub inner: Option<ChatState>,
     ctrlc_rx: broadcast::Receiver<()>,
 }
 
 impl ChatSession {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        os: &mut Os,
+        os: &Os,
         stdout: std::io::Stdout,
         mut stderr: std::io::Stderr,
         conversation_id: &str,
