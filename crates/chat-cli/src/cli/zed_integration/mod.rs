@@ -59,14 +59,13 @@ impl QAgent {
         chat_args: ChatArgs,
         mut os: Os,
     ) -> Self {
-        let stdout = std::io::stdout();
         let mut stderr = std::io::stderr();
 
         let mcp_enabled = os.client.is_mcp_enabled().await.unwrap();
 
         let agents = {
             let skip_migration = false;
-            let (mut agents, md) = Agents::load(&mut os, None, skip_migration, &mut stderr, mcp_enabled).await;
+            let (mut agents, _md) = Agents::load(&mut os, None, skip_migration, &mut stderr, mcp_enabled).await;
             agents.trust_all_tools = false;
 
             // // this needs session id so need to put in new session
@@ -99,35 +98,32 @@ impl QAgent {
                 os.database.settings.set(Setting::McpLoadedBefore, true).await.unwrap();
             }
 
-            match chat_args.trust_tools {
-                Some(ref trust_tools) => {
-                    for tool in trust_tools {
-                        if !tool.starts_with("@") && !NATIVE_TOOLS.contains(&tool.as_str()) {
-                            let _ = queue!(
-                                stderr,
-                                style::SetForegroundColor(Color::Yellow),
-                                style::Print("WARNING: "),
-                                style::SetForegroundColor(Color::Reset),
-                                style::Print("--trust-tools arg for custom tool "),
-                                style::SetForegroundColor(Color::Cyan),
-                                style::Print(tool),
-                                style::SetForegroundColor(Color::Reset),
-                                style::Print(" needs to be prepended with "),
-                                style::SetForegroundColor(Color::Green),
-                                style::Print("@{MCPSERVERNAME}/"),
-                                style::SetForegroundColor(Color::Reset),
-                                style::Print("\n"),
-                            );
-                        }
+            if let Some(ref trust_tools) = chat_args.trust_tools {
+                for tool in trust_tools {
+                    if !tool.starts_with("@") && !NATIVE_TOOLS.contains(&tool.as_str()) {
+                        let _ = queue!(
+                            stderr,
+                            style::SetForegroundColor(Color::Yellow),
+                            style::Print("WARNING: "),
+                            style::SetForegroundColor(Color::Reset),
+                            style::Print("--trust-tools arg for custom tool "),
+                            style::SetForegroundColor(Color::Cyan),
+                            style::Print(tool),
+                            style::SetForegroundColor(Color::Reset),
+                            style::Print(" needs to be prepended with "),
+                            style::SetForegroundColor(Color::Green),
+                            style::Print("@{MCPSERVERNAME}/"),
+                            style::SetForegroundColor(Color::Reset),
+                            style::Print("\n"),
+                        );
                     }
+                }
 
-                    let _ = stderr.flush();
+                let _ = stderr.flush();
 
-                    if let Some(a) = agents.get_active_mut() {
-                        a.allowed_tools.extend(trust_tools.clone());
-                    }
-                },
-                _ => {},
+                if let Some(a) = agents.get_active_mut() {
+                    a.allowed_tools.extend(trust_tools.clone());
+                }
             }
 
             agents
@@ -177,8 +173,9 @@ impl acp::Agent for QAgent {
 
     async fn new_session(
         &self,
-        args: agent_client_protocol::NewSessionRequest,
+        _args: agent_client_protocol::NewSessionRequest,
     ) -> anyhow::Result<acp::NewSessionResponse, acp::Error> {
+        let os_ref = &self.os.borrow().clone();
         let session_id = uuid::Uuid::new_v4().to_string();
 
         let mut stderr = std::io::stderr();
@@ -194,18 +191,17 @@ impl acp::Agent for QAgent {
             .prompt_query_result_receiver(prompt_response_receiver.resubscribe())
             .conversation_id(&session_id)
             .agent(self.agents.get_active().cloned().unwrap_or_default())
-            .build(&self.os.borrow(), Box::new(std::io::stderr()), true)
+            .build(os_ref, Box::new(std::io::stderr()), true)
             .await
             .unwrap();
 
-        let tool_config = tool_manager.load_tools(&self.os.borrow(), &mut stderr).await.unwrap();
+        let tool_config = tool_manager.load_tools(os_ref, &mut stderr).await.unwrap();
 
-        let input_source =
-            InputSource::new(&self.os.borrow(), prompt_request_sender, prompt_response_receiver).unwrap();
+        let input_source = InputSource::new(os_ref, prompt_request_sender, prompt_response_receiver).unwrap();
 
         // If modelId is specified, verify it exists before starting the chat
         // Otherwise, CLI will use a default model when starting chat
-        let (models, default_model_opt) = get_available_models(&self.os.borrow()).await.unwrap();
+        let (models, default_model_opt) = get_available_models(os_ref).await.unwrap();
         let model_id: Option<String> = if let Some(requested) = self.chat_args.model.as_ref() {
             if let Some(m) = find_model(&models, requested) {
                 Some(m.model_id.clone())
@@ -218,7 +214,7 @@ impl acp::Agent for QAgent {
                 error!("Model '{}' does not exist. Available models: {}", requested, available);
                 None
             }
-        } else if let Some(saved) = self.os.borrow().database.settings.get_string(Setting::ChatDefaultModel) {
+        } else if let Some(saved) = os_ref.database.settings.get_string(Setting::ChatDefaultModel) {
             find_model(&models, &saved)
                 .map(|m| m.model_id.clone())
                 .or(Some(default_model_opt.model_id.clone()))
@@ -228,7 +224,7 @@ impl acp::Agent for QAgent {
 
         // Need to create ChatSession in here
         let chat_session = ChatSession::new(
-            &self.os.borrow(),
+            os_ref,
             std::io::stdout(),
             std::io::stderr(),
             &session_id,
@@ -257,42 +253,51 @@ impl acp::Agent for QAgent {
         Err(acp::Error::method_not_found())
     }
 
+    #[allow(clippy::await_holding_refcell_ref)]
     async fn prompt(
         &self,
         args: agent_client_protocol::PromptRequest,
     ) -> anyhow::Result<acp::PromptResponse, acp::Error> {
-        let mut sessions = self.sessions.borrow_mut();
-        let chat_session = sessions.get_mut(&args.session_id.to_string()).unwrap();
+        let contents = {
+            let mut sessions = self.sessions.borrow_mut();
+            let chat_session = sessions.get_mut(&args.session_id.to_string()).unwrap();
 
-        let prompt_inputs: Vec<String> = args
-            .prompt
-            .iter()
-            .filter_map(|block| match block {
-                agent_client_protocol::ContentBlock::Text(block) => Some(block.text.clone()),
-                agent_client_protocol::ContentBlock::ResourceLink(block) => Some(block.uri.clone()),
-                _ => None,
-            })
-            .collect();
+            let os_ref = &mut self.os.borrow().clone();
 
-        for input in prompt_inputs {
-            chat_session.inner = Some(ChatState::HandleInput { input });
-
-            while !matches!(
-                chat_session.inner,
-                Some(ChatState::PromptUser {
-                    skip_printing_tools: false
+            let prompt_inputs: Vec<String> = args
+                .prompt
+                .iter()
+                .filter_map(|block| match block {
+                    agent_client_protocol::ContentBlock::Text(block) => Some(block.text.clone()),
+                    agent_client_protocol::ContentBlock::ResourceLink(block) => Some(block.uri.clone()),
+                    _ => None,
                 })
-            ) {
-                chat_session.next(&mut *self.os.borrow_mut()).await;
+                .collect();
+
+            let mut contents = Vec::new();
+            for input in prompt_inputs {
+                chat_session.inner = Some(ChatState::HandleInput { input });
+
+                while !matches!(
+                    chat_session.inner,
+                    Some(ChatState::PromptUser {
+                        skip_printing_tools: false
+                    })
+                ) {
+                    chat_session.next(os_ref).await.map_err(anyhow::Error::from)?;
+                }
+
+                // TODO: handle tool use approval
+
+                contents.push(ContentBlock::Text(TextContent {
+                    annotations: None,
+                    text: chat_session.conversation.transcript.back().unwrap().clone(),
+                }));
             }
+            contents
+        };
 
-            // TODO: handle tool use approval
-
-            let content = ContentBlock::Text(TextContent {
-                annotations: None,
-                text: chat_session.conversation.transcript.back().unwrap().clone(),
-            });
-
+        for content in contents {
             let (tx, rx) = oneshot::channel();
             self.session_update_tx
                 .send((
@@ -302,8 +307,8 @@ impl acp::Agent for QAgent {
                     },
                     tx,
                 ))
-                .map_err(|_| acp::Error::internal_error())?;
-            rx.await.map_err(|_| acp::Error::internal_error())?;
+                .map_err(|_e| acp::Error::internal_error())?;
+            rx.await.map_err(|_e| acp::Error::internal_error())?;
         }
 
         Ok(acp::PromptResponse {

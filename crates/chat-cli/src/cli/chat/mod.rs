@@ -439,7 +439,7 @@ impl ChatArgs {
                 handle_io.await
             })
             .await
-            .map_err(|_| ErrReport::msg("Failed to run chat"))
+            .map_err(|e| ErrReport::msg("Failed to run chat").wrap_err(e))
             .map(|_| ExitCode::SUCCESS)
     }
 }
