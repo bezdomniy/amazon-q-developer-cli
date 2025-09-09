@@ -327,10 +327,7 @@ impl Database {
     // }
 
     /// Get a chat conversation given a path to the conversation.
-    pub fn get_conversation_by_path(
-        &self,
-        path: impl AsRef<Path>,
-    ) -> Result<Option<ConversationState>, DatabaseError> {
+    pub fn get_conversation_by_path(&self, path: impl AsRef<Path>) -> Result<Option<ConversationState>, DatabaseError> {
         // We would need to encode this to support non utf8 paths.
         let path = match path.as_ref().to_str() {
             Some(path) => path,

@@ -1,35 +1,64 @@
-use std::{cell::{RefCell}, collections::HashMap, io::Write, sync::Arc};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::io::Write;
+use std::sync::Arc;
 
-use agent_client_protocol::{self as acp, ContentBlock, SessionNotification, TextContent};
-use crossterm::{
-    execute, queue, style::{self, Color}
+use agent_client_protocol::{
+    self as acp,
+    ContentBlock,
+    SessionNotification,
+    TextContent,
 };
-use tokio::sync::{mpsc, oneshot};
-
-use crate::{
-    cli::{
-        agent::Agents,
-        chat::{
-            cli::model::{find_model, get_available_models}, input_source::InputSource, tool_manager::{PromptQuery, PromptQueryResult, ToolManagerBuilder}, tools::NATIVE_TOOLS, ChatArgs, ChatSession, ChatState
-        },
-    },
-    database::settings::Setting,
-    os::Os,
+use crossterm::style::{
+    self,
+    Color,
+};
+use crossterm::{
+    execute,
+    queue,
+};
+use tokio::sync::{
+    mpsc,
+    oneshot,
 };
 use tracing::error;
+
+use crate::cli::agent::Agents;
+use crate::cli::chat::cli::model::{
+    find_model,
+    get_available_models,
+};
+use crate::cli::chat::input_source::InputSource;
+use crate::cli::chat::tool_manager::{
+    PromptQuery,
+    PromptQueryResult,
+    ToolManagerBuilder,
+};
+use crate::cli::chat::tools::NATIVE_TOOLS;
+use crate::cli::chat::{
+    ChatArgs,
+    ChatSession,
+    ChatState,
+};
+use crate::database::settings::Setting;
+use crate::os::Os;
 
 pub struct QAgent {
     session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
     sessions: RefCell<HashMap<String, ChatSession>>,
     chat_args: ChatArgs,
     os: RefCell<Os>,
-    
+
     agents: Agents,
     mcp_enabled: bool,
 }
 
 impl QAgent {
-    pub async fn new(session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>, chat_args: ChatArgs, mut os: Os) -> Self {
+    pub async fn new(
+        session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
+        chat_args: ChatArgs,
+        mut os: Os,
+    ) -> Self {
         let stdout = std::io::stdout();
         let mut stderr = std::io::stderr();
 
@@ -171,7 +200,8 @@ impl acp::Agent for QAgent {
 
         let tool_config = tool_manager.load_tools(&self.os.borrow(), &mut stderr).await.unwrap();
 
-        let input_source = InputSource::new(&self.os.borrow(), prompt_request_sender, prompt_response_receiver).unwrap();
+        let input_source =
+            InputSource::new(&self.os.borrow(), prompt_request_sender, prompt_response_receiver).unwrap();
 
         // If modelId is specified, verify it exists before starting the chat
         // Otherwise, CLI will use a default model when starting chat
@@ -234,22 +264,29 @@ impl acp::Agent for QAgent {
         let mut sessions = self.sessions.borrow_mut();
         let chat_session = sessions.get_mut(&args.session_id.to_string()).unwrap();
 
-        let prompt_inputs: Vec<String> = args.prompt.iter().filter_map(
-            |block| match block {
+        let prompt_inputs: Vec<String> = args
+            .prompt
+            .iter()
+            .filter_map(|block| match block {
                 agent_client_protocol::ContentBlock::Text(block) => Some(block.text.clone()),
                 agent_client_protocol::ContentBlock::ResourceLink(block) => Some(block.uri.clone()),
                 _ => None,
-            }, 
-        ).collect();
+            })
+            .collect();
 
         for input in prompt_inputs {
             chat_session.inner = Some(ChatState::HandleInput { input });
 
-            while !matches!(chat_session.inner, Some(ChatState::PromptUser { skip_printing_tools: false })) {
+            while !matches!(
+                chat_session.inner,
+                Some(ChatState::PromptUser {
+                    skip_printing_tools: false
+                })
+            ) {
                 chat_session.next(&mut *self.os.borrow_mut()).await;
             }
 
-            //TODO: handle tool use approval
+            // TODO: handle tool use approval
 
             let content = ContentBlock::Text(TextContent {
                 annotations: None,

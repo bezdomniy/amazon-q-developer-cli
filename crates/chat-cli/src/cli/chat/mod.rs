@@ -35,7 +35,10 @@ use std::time::{
     Instant,
 };
 
-use agent_client_protocol::{AgentSideConnection, Client};
+use agent_client_protocol::{
+    AgentSideConnection,
+    Client,
+};
 use amzn_codewhisperer_client::types::SubscriptionStatus;
 use clap::{
     Args,
@@ -97,7 +100,10 @@ use tokio::sync::{
     Mutex,
     broadcast,
 };
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use tokio_util::compat::{
+    TokioAsyncReadCompatExt,
+    TokioAsyncWriteCompatExt,
+};
 use tool_manager::{
     PromptQuery,
     PromptQueryResult,
@@ -140,7 +146,6 @@ use crate::api_client::{
 };
 use crate::auth::AuthError;
 use crate::auth::builder_id::is_idc_user;
-use crate::cli::zed_integration::QAgent;
 use crate::cli::TodoListState;
 use crate::cli::agent::Agents;
 use crate::cli::chat::cli::SlashCommand;
@@ -152,6 +157,7 @@ use crate::cli::chat::cli::prompts::{
 };
 use crate::cli::chat::message::UserMessage;
 use crate::cli::chat::util::sanitize_unicode_tags;
+use crate::cli::zed_integration::QAgent;
 use crate::database::settings::Setting;
 use crate::mcp_client::Prompt;
 use crate::os::Os;
@@ -411,7 +417,6 @@ impl ChatArgs {
         let local_set = tokio::task::LocalSet::new();
         local_set
             .run_until(async move {
-
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                 let q_agent = QAgent::new(tx, self.clone(), os.clone()).await;
 
@@ -434,8 +439,8 @@ impl ChatArgs {
                 handle_io.await
             })
             .await
-        .map_err(|_| ErrReport::msg("Failed to run chat"))
-        .map(|_| ExitCode::SUCCESS)
+            .map_err(|_| ErrReport::msg("Failed to run chat"))
+            .map(|_| ExitCode::SUCCESS)
     }
 }
 

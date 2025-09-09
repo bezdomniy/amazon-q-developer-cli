@@ -622,11 +622,7 @@ impl ToolManager {
         Ok(())
     }
 
-    pub async fn load_tools(
-        &mut self,
-        os: &Os,
-        stderr: &mut impl Write,
-    ) -> eyre::Result<HashMap<String, ToolSpec>> {
+    pub async fn load_tools(&mut self, os: &Os, stderr: &mut impl Write) -> eyre::Result<HashMap<String, ToolSpec>> {
         let tx = self.loading_status_sender.take();
         let notify = self.notify.take();
         self.schema = {
